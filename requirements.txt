@@ -1,0 +1,13 @@
+# UI Framework
+streamlit==1.42.0
+
+# API Communication
+requests==2.32.3
+python-dotenv==1.0.1
+
+# Data Processing & Visualisation
+pandas==2.2.2
+plotly==6.0.0
+pydeck==0.9.1
+
+# Production Server

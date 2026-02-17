@@ -1,0 +1,14 @@
+# Python & Environment
+.venv/
+__pycache__/
+*.py[cod]
+
+# Data & Large Files
+data/*.geojson
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+.env
