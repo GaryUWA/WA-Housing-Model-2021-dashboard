@@ -9,5 +9,7 @@ python-dotenv==1.0.1
 pandas==2.2.2
 plotly==6.0.0
 pydeck==0.9.1
+geopandas==1.0.1
+pyogrio==0.10.0
 
 # Production Server
