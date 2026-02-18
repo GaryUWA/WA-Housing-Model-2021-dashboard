@@ -248,6 +248,42 @@ if active_area != "Show All WA":
             )
             st.plotly_chart(fig, use_container_width=True, key=f"pie_{active_area}")
 
+        # --- HOUSING STRESS DISTRIBUTION ---
+        st.divider()
+        st.subheader("State-wide Stress Distribution")
+        st.write(f"How {active_area} compares to all other areas in Western Australia.")
+        
+        hist_fig = px.histogram(
+            valid_df, 
+            x="housing_stress_index",
+            nbins=50,
+            title="Distribution of Housing Stress Across WA",
+            labels={'housing_stress_index': 'Housing Stress Index (%)'},
+            color_discrete_sequence=['#cbd5e0']
+        )
+        
+        # Add a vertical line for the selected area
+        hist_fig.add_vline(
+            x=area_row['housing_stress_index'], 
+            line_width=3, 
+            line_dash="dash", 
+            line_color="#e53e3e",
+            annotation_text=f"{active_area}: {area_row['housing_stress_index']:.1f}%",
+            annotation_position="top right"
+        )
+        
+        # Refined hover labels
+        hist_fig.update_traces(
+            hovertemplate="<b>Stress Level:</b> %{x:.1f}%<br><b>Areas Count:</b> %{y}<extra></extra>"
+        )
+        
+        hist_fig.update_layout(
+            margin=dict(l=0, r=0, t=40, b=0),
+            height=350,
+            yaxis_title="Number of Areas"
+        )
+        st.plotly_chart(hist_fig, use_container_width=True)
+
     with tab3:
         if run_calc:
             if not is_online:
