@@ -8,9 +8,10 @@ from api_client import check_api_health, get_prediction
 
 st.set_page_config(page_title="WA Housing Model 2021", layout="wide")
 
-# Custom CSS for the legend and UI
+# Custom CSS for the legend, metrics, and scrollbar visibility
 st.markdown("""
     <style>
+    /* Legend styling */
     .legend-bar {
         height: 10px;
         width: 100%;
@@ -18,10 +19,43 @@ st.markdown("""
         border-radius: 5px;
         margin-top: 5px;
     }
+    /* Metric card styling */
     .stMetric {
         background-color: #f0f2f6;
         padding: 10px;
         border-radius: 10px;
+    }
+    
+    /* Force sidebar and dropdown menu scrollbars to be visible and grabbable */
+    section[data-testid="stSidebar"] .st-emotion-cache-6qob1r, 
+    ul[data-testid="stSelectboxVirtualList"] {
+        overflow-y: auto !important;
+    }
+
+    /* Target both sidebar and the dropdown popover scrollbars */
+    section[data-testid="stSidebar"] ::-webkit-scrollbar,
+    [data-testid="stVirtualList"] ::-webkit-scrollbar {
+        width: 12px;
+        height: 12px;
+        display: block !important;
+    }
+
+    section[data-testid="stSidebar"] ::-webkit-scrollbar-track,
+    [data-testid="stVirtualList"] ::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 10px;
+    }
+
+    section[data-testid="stSidebar"] ::-webkit-scrollbar-thumb,
+    [data-testid="stVirtualList"] ::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 10px;
+        border: 2px solid #f1f1f1;
+    }
+
+    section[data-testid="stSidebar"] ::-webkit-scrollbar-thumb:hover,
+    [data-testid="stVirtualList"] ::-webkit-scrollbar-thumb:hover {
+        background: #555;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -67,6 +101,11 @@ def load_data():
 
 geojson_data, df_master, model_keys = load_data()
 
+# Initialize session state for the confirmed selection
+# This ensures "Show All WA" is the default on initial load.
+if 'confirmed_selection' not in st.session_state:
+    st.session_state.confirmed_selection = "Show All WA"
+
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("Global Controls")
@@ -78,7 +117,21 @@ with st.sidebar:
     
     st.divider()
     valid_df = df_master.dropna(subset=['DISPLAY_NAME'])
-    selected_option = st.selectbox("Choose an Area", ["Show All WA"] + sorted(valid_df['DISPLAY_NAME'].unique()))
+    
+    # --- AREA SELECTION FORM ---
+    # wrapping this in a form prevents the selectbox from triggering a rerun until the button is hit
+    with st.form("area_selection_form"):
+        selected_option = st.selectbox(
+            "Choose an Area", 
+            ["Show All WA"] + sorted(valid_df['DISPLAY_NAME'].unique()),
+            # Ensure the dropdown visually reflects what is actually currently loaded
+            index=(["Show All WA"] + sorted(valid_df['DISPLAY_NAME'].unique())).index(st.session_state.confirmed_selection)
+        )
+        
+        # This button acts as the "Calculate" equivalent for the map and metrics
+        if st.form_submit_button("Select Area", type="primary", use_container_width=True):
+            st.session_state.confirmed_selection = selected_option
+            st.rerun() # Force immediate update to reflect the new choice
     
     # Legend
     st.write("Housing Stress Legend")
@@ -96,9 +149,12 @@ with st.sidebar:
         
         run_calc = st.form_submit_button("Calculate Prediction", type="primary", use_container_width=True)
 
+# Use the confirmed selection for the rest of the app logic
+active_area = st.session_state.confirmed_selection
+
 # --- MAIN CONTENT ---
 st.title("WA Housing Model 2021")
-tab1, tab2, tab3 = st.tabs(["🗺️ Geospatial View", "📊 Area Metrics", "📈 Prediction Results"])
+tab1, tab2, tab3 = st.tabs(["🗺️ Geospatial View", "📊 Area Metrics", "📈 Scenario Results"])
 
 with tab1:
     # Default view (Perth)
@@ -107,8 +163,8 @@ with tab1:
     # Visual distinctness for selection
     highlight_color = [0, 255, 255, 255] # Bright Cyan
     
-    if selected_option != "Show All WA":
-        area_data = valid_df[valid_df['DISPLAY_NAME'] == selected_option].iloc[0]
+    if active_area != "Show All WA":
+        area_data = valid_df[valid_df['DISPLAY_NAME'] == active_area].iloc[0]
         view_state = pdk.ViewState(
             latitude=area_data['centroid_lat'], 
             longitude=area_data['centroid_lon'], 
@@ -125,18 +181,20 @@ with tab1:
             filled=True,
             get_fill_color="[255, (1 - properties.housing_stress_index / 100) * 255, 0, 150]",
             # Highlight selected area in Cyan, others faint white
-            get_line_color=f"properties.SAL_NAME21 == '{selected_option}' ? {highlight_color} : [255, 255, 255, 50]",
-            line_width_min_pixels=6 if selected_option != "Show All WA" else 1,
+            get_line_color=f"properties.SAL_NAME21 == '{active_area}' ? {highlight_color} : [255, 255, 255, 50]",
+            line_width_min_pixels=6 if active_area != "Show All WA" else 1,
             pickable=True
         )
     ]
-    st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view_state))
+    # Spinner for notifying that the geospatial layers are rendering
+    with st.spinner("Loading..."):
+        st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view_state))
 
-if selected_option != "Show All WA":
-    area_row = valid_df[valid_df['DISPLAY_NAME'] == selected_option].iloc[0]
+if active_area != "Show All WA":
+    area_row = valid_df[valid_df['DISPLAY_NAME'] == active_area].iloc[0]
     
     with tab2:
-        st.subheader(f"Baseline Stats: {selected_option}")
+        st.subheader(f"Baseline Stats: {active_area}")
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Avg. Weekly Income", f"${area_row['avg_weekly_income']:,.0f}")
         c2.metric("Avg. Weekly Rent", f"${area_row['avg_weekly_rent']:,.0f}")
@@ -178,12 +236,17 @@ if selected_option != "Show All WA":
                 hole=0.4,
                 color_discrete_sequence=["#6cd48c", "#bd8112"]
             )
+            
+            # Hover labels and layout
+            fig.update_traces(
+                hovertemplate="<b>Sector:</b> %{label}<br><b>Count:</b> %{value:,.0f}<extra></extra>"
+            )
             fig.update_layout(
                 margin=dict(l=0, r=0, t=0, b=0),
                 showlegend=True,
                 legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
             )
-            st.plotly_chart(fig, use_container_width=True, key=f"pie_{selected_option}")
+            st.plotly_chart(fig, use_container_width=True, key=f"pie_{active_area}")
 
     with tab3:
         if run_calc:
@@ -221,7 +284,7 @@ if selected_option != "Show All WA":
                         )
                         
                         # Comparison display
-                        st.write(f"The simulated changes result in a **{abs(new_val - curr_val):.2f}%** {'increase' if new_val > curr_val else 'decrease'} in housing stress for {selected_option}.")
+                        st.write(f"The simulated changes result in a **{abs(new_val - curr_val):.2f}%** {'increase' if new_val > curr_val else 'decrease'} in housing stress for {active_area}.")
                     else:
                         st.error(f"Prediction Failed. Sent {len(payload)} features.")
                         with st.expander("Debug Info"):
