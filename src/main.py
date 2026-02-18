@@ -292,7 +292,6 @@ if active_area != "Show All WA":
                         st.write("This chart indicates how significantly each feature was modified relative to its allowable simulation range.")
                         
                         # Calculate relative impact (absolute values of adjustments scaled for comparison)
-                        # Helps explain why 0.01% shifts occur vs large shifts.
                         impact_data = pd.DataFrame({
                             'Feature': ['Income', 'Rent', 'Mortgage', 'Unemployment', 'Mining'],
                             'Relative Change': [abs(inc_adj)/500, abs(rent_adj)/200, abs(mort_adj)/200, abs(unemp_adj)/10, abs(mining_adj)/10]
@@ -310,6 +309,44 @@ if active_area != "Show All WA":
                         )
                         fig_imp.update_layout(showlegend=False, height=300, margin=dict(l=0, r=0, t=40, b=0))
                         st.plotly_chart(fig_imp, use_container_width=True)
+
+                        # --- SCENARIO COMPARISON TABLE ---
+                        st.divider()
+                        st.subheader("Scenario Comparison Detail")
+                        st.write("Detailed view of baseline versus simulated parameters.")
+                        
+                        comparison_df = pd.DataFrame({
+                            "Parameter": [
+                                "Avg. Weekly Income", 
+                                "Avg. Weekly Rent", 
+                                "Avg. Weekly Mortgage", 
+                                "Unemployment Rate", 
+                                "Mining Workforce"
+                            ],
+                            "Baseline": [
+                                f"${area_row['avg_weekly_income']:,.0f}",
+                                f"${area_row['avg_weekly_rent']:,.0f}",
+                                f"${area_row['avg_weekly_mortgage']:,.0f}",
+                                f"{area_row['unemployment_rate']:.1f}%",
+                                f"{area_row['total_mining']:,.0f}"
+                            ],
+                            "Simulated": [
+                                f"${sim_data['avg_weekly_income']:,.0f}",
+                                f"${sim_data['avg_weekly_rent']:,.0f}",
+                                f"${sim_data['avg_weekly_mortgage']:,.0f}",
+                                f"{sim_data['unemployment_rate']:.1f}%",
+                                f"{sim_data['total_mining']:,.0f}"
+                            ],
+                            "Change": [
+                                f"{'+' if inc_adj > 0 else ''}${inc_adj:,.0f}",
+                                f"{'+' if rent_adj > 0 else ''}${rent_adj:,.0f}",
+                                f"{'+' if mort_adj > 0 else ''}${mort_adj:,.0f}",
+                                f"{'+' if unemp_adj > 0 else ''}{unemp_adj:.1f}%",
+                                f"{(mining_adj):.1f}% factor"
+                            ]
+                        })
+                        
+                        st.table(comparison_df)
 
                     else:
                         st.error(f"Prediction Failed. Sent {len(payload)} features.")
