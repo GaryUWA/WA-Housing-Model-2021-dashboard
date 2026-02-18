@@ -4,9 +4,16 @@ import geopandas as gpd
 import pydeck as pdk
 import json
 import plotly.express as px
+import joblib
+import os
+import sklearn 
 from api_client import check_api_health, get_prediction
 
 st.set_page_config(page_title="WA Housing Model 2021", layout="wide")
+
+# Initialise session state for connection mode
+if 'use_local' not in st.session_state:
+    st.session_state.use_local = False
 
 # Custom CSS for the legend, metrics, and scrollbar visibility
 st.markdown("""
@@ -60,6 +67,14 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+@st.cache_resource
+def load_local_models():
+    """Load joblib models for local inference fallback."""
+    # Ensure paths are correct relative to root
+    model = joblib.load("models/housing_stress_model.joblib")
+    scaler = joblib.load("models/scaler.joblib")
+    return model, scaler
+
 @st.cache_data
 def load_data():
     # Load raw data
@@ -74,10 +89,10 @@ def load_data():
     gdf['geometry'] = gdf.geometry.simplify(tolerance=100, preserve_topology=True)
     gdf = gdf.to_crs(epsg=4326)
     
-    # Identify model features STRICTLY from the raw CSV to avoid merge duplicates
-    target_col = 'housing_stress_index'
-    id_col = 'SAL_CODE_2021'
-    model_features = [c for c in df_raw.columns if c not in [target_col, id_col]]
+    # Identify model features
+    # Retrieve from scaler to ensure exact match with training phase
+    _, scaler = load_local_models()
+    model_features = list(scaler.feature_names_in_)
     
     # Centroid calculation for map snapping
     projected_gdf = gdf.to_crs(epsg=3857)
@@ -91,6 +106,9 @@ def load_data():
     # Prepare lookup
     names_lookup = gdf[[code_col, name_col, 'centroid_lat', 'centroid_lon']].copy()
     names_lookup[code_col] = names_lookup[code_col].astype(str)
+    
+    target_col = 'housing_stress_index'
+    id_col = 'SAL_CODE_2021'
     df_raw[id_col] = df_raw[id_col].astype(str)
     
     # Merge for display, but we keep model_features list clean from the original df_raw
@@ -112,29 +130,39 @@ if 'confirmed_selection' not in st.session_state:
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("Global Controls")
-    is_online = check_api_health()
-    if is_online:
-        st.success("API Status: Online")
+    
+    # Connection Logic
+    if st.session_state.use_local:
+        st.warning("Mode: Local Inference")
+        if st.button("Connect to API"):
+            st.session_state.use_local = False
+            st.rerun()
     else:
-        st.error("API Status: Offline")
+        is_online = check_api_health() # This has its own timeout in api_client
+        if is_online:
+            st.success("API Status: Online")
+        else:
+            st.error("API Status: Offline")
+            st.session_state.use_local = True
+            st.rerun()
     
     st.divider()
     valid_df = df_master.dropna(subset=['DISPLAY_NAME'])
     
     # --- AREA SELECTION FORM ---
-    # wrapping this in a form prevents the selectbox from triggering a rerun until the button is hit
+    # wrapping this in a form prevents selectbox from triggering a rerun until button is hit
     with st.form("area_selection_form"):
         selected_option = st.selectbox(
             "Choose an Area", 
             ["Show All WA"] + sorted(valid_df['DISPLAY_NAME'].unique()),
-            # Ensure the dropdown visually reflects what is actually currently loaded
+            # Ensures dropdown visually reflects what is actually currently loaded
             index=(["Show All WA"] + sorted(valid_df['DISPLAY_NAME'].unique())).index(st.session_state.confirmed_selection)
         )
-        
-        # This button acts as the "Calculate" equivalent for the map and metrics
+
+        # Button acts as the "Calculate" equivalent for the map and metrics
         if st.form_submit_button("Select Area", type="primary", use_container_width=True):
             st.session_state.confirmed_selection = selected_option
-            st.rerun() # Force immediate update to reflect the new choice
+            st.rerun() 
     
     # Legend
     st.write("Housing Stress Legend")
@@ -162,9 +190,8 @@ tab1, tab2, tab3 = st.tabs(["🗺️ Geospatial View", "📊 Area Metrics", "�
 with tab1:
     # Default view (Perth)
     view_state = pdk.ViewState(latitude=-31.95, longitude=115.86, zoom=6)
-    
     # Visual distinctness for selection
-    highlight_color = [0, 255, 255, 255] # Bright Cyan
+    highlight_color = [0, 255, 255, 255] 
     
     if active_area != "Show All WA":
         area_data = valid_df[valid_df['DISPLAY_NAME'] == active_area].iloc[0]
@@ -183,7 +210,6 @@ with tab1:
             stroked=True,
             filled=True,
             get_fill_color="[255, (1 - properties.housing_stress_index / 100) * 255, 0, 150]",
-            # Highlight selected area in Cyan, others faint white
             get_line_color=f"properties.SAL_NAME21 == '{active_area}' ? {highlight_color} : [255, 255, 255, 50]",
             line_width_min_pixels=6 if active_area != "Show All WA" else 1,
             pickable=True
@@ -227,7 +253,6 @@ if active_area != "Show All WA":
                 'Type': ['Renting', 'Mortgage'],
                 'Count': [area_row['renting_households_count'], area_row['mortgage_households_count']]
             })
-            # Right chart updated to light red
             st.bar_chart(tenure_data.set_index('Type'), color="#ff9999", x_label="Tenure Type", y_label="No. of Households")
 
         with col_right:
@@ -244,10 +269,7 @@ if active_area != "Show All WA":
                 color_discrete_sequence=["#6cd48c", "#bd8112"]
             )
             
-            # Hover labels and layout
-            fig.update_traces(
-                hovertemplate="<b>Sector:</b> %{label}<br><b>Count:</b> %{value:,.0f}<extra></extra>"
-            )
+            fig.update_traces(hovertemplate="<b>Sector:</b> %{label}<br><b>Count:</b> %{value:,.0f}<extra></extra>")
             fig.update_layout(
                 margin=dict(l=0, r=0, t=0, b=0),
                 showlegend=True,
@@ -268,7 +290,7 @@ if active_area != "Show All WA":
             labels={'housing_stress_index': 'Housing Stress Index (%)'},
             color_discrete_sequence=['#cbd5e0']
         )
-        
+
         # Add a vertical line for the selected area
         hist_fig.add_vline(
             x=area_row['housing_stress_index'], 
@@ -279,122 +301,116 @@ if active_area != "Show All WA":
             annotation_position="top right"
         )
         
-        # Refined hover labels
-        hist_fig.update_traces(
-            hovertemplate="<b>Stress Level:</b> %{x:.1f}%<br><b>Areas Count:</b> %{y}<extra></extra>"
-        )
-        
-        hist_fig.update_layout(
-            margin=dict(l=0, r=0, t=40, b=0),
-            height=350,
-            yaxis_title="Number of Areas"
-        )
+        hist_fig.update_traces(hovertemplate="<b>Stress Level:</b> %{x:.1f}%<br><b>Areas Count:</b> %{y}<extra></extra>")
+        hist_fig.update_layout(margin=dict(l=0, r=0, t=40, b=0), height=350, yaxis_title="Number of Areas")
         st.plotly_chart(hist_fig, use_container_width=True)
 
     with tab3:
         if run_calc:
-            if not is_online:
-                st.error("Cannot calculate: API is offline.")
-            else:
-                with st.spinner('Calculating Scenario Impacts...'):
-                    # Workspace
-                    sim_data = area_row.to_dict()
+            with st.spinner('Calculating Scenario Impacts...'):
+                # Prepare workspace
+                sim_data = area_row.to_dict()
+                
+                # Apply Adjustments
+                sim_data['avg_weekly_income'] += inc_adj
+                sim_data['avg_weekly_rent'] += rent_adj
+                sim_data['avg_weekly_mortgage'] += mort_adj
+                sim_data['unemployment_rate'] = max(0, sim_data['unemployment_rate'] + unemp_adj)
+                sim_data['total_mining'] = max(0, sim_data['total_mining'] * (1 + mining_adj/100))
+
+                # Payload: Strictly filter to the model_keys
+                payload = {k: float(sim_data[k]) for k in model_keys if k in sim_data}
+
+                # --- PREDICTION LOGIC (API vs LOCAL) ---
+                prediction_val = None
+                
+                if not st.session_state.use_local:
+                    try:
+                        # Attempt API call
+                        resp = get_prediction(payload)
+                        if resp and 'predicted_housing_stress_index' in resp:
+                            prediction_val = resp['predicted_housing_stress_index']
+                    except Exception:
+                        st.session_state.use_local = True
+                        st.warning("API connection failed during calculation. Falling back to local model.")
+
+                # Fallback to local joblib if API failed or we are in local mode
+                if prediction_val is None:
+                    try:
+                        model, scaler = load_local_models()
+                        input_df = pd.DataFrame([payload])
+                        # Reorder to match model training features
+                        input_df = input_df[model_keys]
+                        scaled_data = scaler.transform(input_df)
+                        prediction_val = model.predict(scaled_data)[0]
+                    except Exception as e:
+                        st.error(f"Local inference failed: {e}")
+
+                # --- DISPLAY RESULTS ---
+                if prediction_val is not None:
+                    st.balloons()
+                    st.success(f"Simulation Complete ({'Local Mode' if st.session_state.use_local else 'Live API'})")
                     
-                    # Adjustments
-                    sim_data['avg_weekly_income'] += inc_adj
-                    sim_data['avg_weekly_rent'] += rent_adj
-                    sim_data['avg_weekly_mortgage'] += mort_adj
-                    sim_data['unemployment_rate'] = max(0, sim_data['unemployment_rate'] + unemp_adj)
-                    sim_data['total_mining'] = max(0, sim_data['total_mining'] * (1 + mining_adj/100))
-
-                    # Payload: Strictly filter to the 644 model_keys
-                    payload = {k: float(sim_data[k]) for k in model_keys if k in sim_data}
-
-                    prediction = get_prediction(payload)
+                    curr_val = area_row['housing_stress_index']
+                    st.metric(
+                        label="Predicted Housing Stress Index", 
+                        value=f"{prediction_val:.2f}%", 
+                        delta=f"{prediction_val - curr_val:.2f}%", 
+                        delta_color="inverse"
+                    )
                     
-                    # Check for the correct key from Flask: 'predicted_housing_stress_index'
-                    if isinstance(prediction, dict) and 'predicted_housing_stress_index' in prediction:
-                        new_val = prediction['predicted_housing_stress_index']
-                        st.balloons()
-                        st.success("Simulation Complete")
-                        
-                        curr_val = area_row['housing_stress_index']
-                        st.metric(
-                            label="Predicted Housing Stress Index", 
-                            value=f"{new_val:.2f}%", 
-                            delta=f"{new_val - curr_val:.2f}%", 
-                            delta_color="inverse"
-                        )
-                        
-                        # Comparison display
-                        st.write(f"The simulated changes result in a **{abs(new_val - curr_val):.2f}%** {'increase' if new_val > curr_val else 'decrease'} in housing stress for {active_area}.")
-                        
-                        # --- FEATURE IMPORTANCE PLOT ---
-                        st.divider()
-                        st.subheader("Scenario Change Intensity")
-                        st.write("This chart indicates how significantly each feature was modified relative to its allowable simulation range.")
-                        
-                        # Calculate relative impact (absolute values of adjustments scaled for comparison)
-                        impact_data = pd.DataFrame({
-                            'Feature': ['Income', 'Rent', 'Mortgage', 'Unemployment', 'Mining'],
-                            'Relative Change': [abs(inc_adj)/500, abs(rent_adj)/200, abs(mort_adj)/200, abs(unemp_adj)/10, abs(mining_adj)/10]
-                        }).sort_values('Relative Change', ascending=True)
+                    st.write(f"The simulated changes result in a **{abs(prediction_val - curr_val):.2f}%** {'increase' if prediction_val > curr_val else 'decrease'} in housing stress for {active_area}.")
+                    
+                    # --- FEATURE IMPORTANCE PLOT ---
+                    st.divider()
+                    st.subheader("Scenario Change Intensity")
+                    
+                    impact_data = pd.DataFrame({
+                        'Feature': ['Income', 'Rent', 'Mortgage', 'Unemployment', 'Mining'],
+                        'Relative Change': [abs(inc_adj)/500, abs(rent_adj)/200, abs(mort_adj)/200, abs(unemp_adj)/10, abs(mining_adj)/10]
+                    }).sort_values('Relative Change', ascending=True)
 
-                        fig_imp = px.bar(
-                            impact_data,
-                            x='Relative Change',
-                            y='Feature',
-                            orientation='h',
-                            title="Magnitude of Input Adjustments",
-                            labels={'Relative Change': 'Normalised Adjustment Factor (0-1)'},
-                            color='Relative Change',
-                            color_continuous_scale='Blues'
-                        )
-                        fig_imp.update_layout(showlegend=False, height=300, margin=dict(l=0, r=0, t=40, b=0))
-                        st.plotly_chart(fig_imp, use_container_width=True)
+                    fig_imp = px.bar(
+                        impact_data,
+                        x='Relative Change',
+                        y='Feature',
+                        orientation='h',
+                        title="Magnitude of Input Adjustments",
+                        labels={'Relative Change': 'Normalised Adjustment Factor (0-1)'},
+                        color='Relative Change',
+                        color_continuous_scale='Blues'
+                    )
+                    fig_imp.update_layout(showlegend=False, height=300, margin=dict(l=0, r=0, t=40, b=0))
+                    st.plotly_chart(fig_imp, use_container_width=True)
 
-                        # --- SCENARIO COMPARISON TABLE ---
-                        st.divider()
-                        st.subheader("Scenario Comparison Detail")
-                        st.write("Detailed view of baseline versus simulated parameters.")
-                        
-                        comparison_df = pd.DataFrame({
-                            "Parameter": [
-                                "Avg. Weekly Income", 
-                                "Avg. Weekly Rent", 
-                                "Avg. Weekly Mortgage", 
-                                "Unemployment Rate", 
-                                "Mining Workforce"
-                            ],
-                            "Baseline": [
-                                f"${area_row['avg_weekly_income']:,.0f}",
-                                f"${area_row['avg_weekly_rent']:,.0f}",
-                                f"${area_row['avg_weekly_mortgage']:,.0f}",
-                                f"{area_row['unemployment_rate']:.1f}%",
-                                f"{area_row['total_mining']:,.0f}"
-                            ],
-                            "Simulated": [
-                                f"${sim_data['avg_weekly_income']:,.0f}",
-                                f"${sim_data['avg_weekly_rent']:,.0f}",
-                                f"${sim_data['avg_weekly_mortgage']:,.0f}",
-                                f"{sim_data['unemployment_rate']:.1f}%",
-                                f"{sim_data['total_mining']:,.0f}"
-                            ],
-                            "Change": [
-                                f"{'+' if inc_adj > 0 else ''}${inc_adj:,.0f}",
-                                f"{'+' if rent_adj > 0 else ''}${rent_adj:,.0f}",
-                                f"{'+' if mort_adj > 0 else ''}${mort_adj:,.0f}",
-                                f"{'+' if unemp_adj > 0 else ''}{unemp_adj:.1f}%",
-                                f"{(mining_adj):.1f}% factor"
-                            ]
-                        })
-                        
-                        st.table(comparison_df)
-
-                    else:
-                        st.error(f"Prediction Failed. Sent {len(payload)} features.")
-                        with st.expander("Debug Info"):
-                            st.write("API Response:", prediction)
-                            st.write("Features Sent:", list(payload.keys()))
+                    # --- SCENARIO COMPARISON TABLE ---
+                    st.divider()
+                    st.subheader("Scenario Comparison Detail")
+                    
+                    comparison_df = pd.DataFrame({
+                        "Parameter": ["Avg. Weekly Income", "Avg. Weekly Rent", "Avg. Weekly Mortgage", "Unemployment Rate", "Mining Workforce"],
+                        "Baseline": [
+                            f"${area_row['avg_weekly_income']:,.0f}",
+                            f"${area_row['avg_weekly_rent']:,.0f}",
+                            f"${area_row['avg_weekly_mortgage']:,.0f}",
+                            f"{area_row['unemployment_rate']:.1f}%",
+                            f"{area_row['total_mining']:,.0f}"
+                        ],
+                        "Simulated": [
+                            f"${sim_data['avg_weekly_income']:,.0f}",
+                            f"${sim_data['avg_weekly_rent']:,.0f}",
+                            f"${sim_data['avg_weekly_mortgage']:,.0f}",
+                            f"{sim_data['unemployment_rate']:.1f}%",
+                            f"{sim_data['total_mining']:,.0f}"
+                        ],
+                        "Change": [
+                            f"{'+' if inc_adj > 0 else ''}${inc_adj:,.0f}",
+                            f"{'+' if rent_adj > 0 else ''}${rent_adj:,.0f}",
+                            f"{'+' if mort_adj > 0 else ''}${mort_adj:,.0f}",
+                            f"{'+' if unemp_adj > 0 else ''}{unemp_adj:.1f}%",
+                            f"{(mining_adj):.1f}% factor"
+                        ]
+                    })
+                    st.table(comparison_df)
 else:
     st.info("Select a specific area from the sidebar to enable the Area Metrics and Scenario Simulator.")
