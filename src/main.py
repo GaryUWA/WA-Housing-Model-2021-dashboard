@@ -3,6 +3,7 @@ import pandas as pd
 import geopandas as gpd
 import pydeck as pdk
 import json
+import plotly.express as px
 from api_client import check_api_health, get_prediction
 
 st.set_page_config(page_title="WA Housing Model 2021", layout="wide")
@@ -35,7 +36,8 @@ def load_data():
     # Temporarily project to metres for accurate simplification, then back to degrees
     # Reduces number of polygon vertices to optimise browser performance.
     gdf = gdf.to_crs(epsg=3857)
-    gdf['geometry'] = gdf.geometry.simplify(tolerance=500, preserve_topology=True)
+    # Reduced tolerance to 100m to restore visual detail while maintaining performance
+    gdf['geometry'] = gdf.geometry.simplify(tolerance=100, preserve_topology=True)
     gdf = gdf.to_crs(epsg=4326)
     
     # Identify model features STRICTLY from the raw CSV to avoid merge duplicates
@@ -96,7 +98,7 @@ with st.sidebar:
 
 # --- MAIN CONTENT ---
 st.title("WA Housing Model 2021")
-tab1, tab2, tab3 = st.tabs(["🗺️ Geospatial View", "📊 Economic Data", "📈 Prediction Results"])
+tab1, tab2, tab3 = st.tabs(["🗺️ Geospatial View", "📊 Area Metrics", "📈 Prediction Results"])
 
 with tab1:
     # Default view (Perth)
@@ -134,16 +136,17 @@ if selected_option != "Show All WA":
     area_row = valid_df[valid_df['DISPLAY_NAME'] == selected_option].iloc[0]
     
     with tab2:
-        st.subheader(f"Baseline Economics: {selected_option}")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Weekly Income", f"${area_row['avg_weekly_income']:,.0f}")
-        c2.metric("Weekly Rent", f"${area_row['avg_weekly_rent']:,.0f}")
-        c3.metric("Current Stress", f"{area_row['housing_stress_index']:.1f}%")
-        c4.metric("Mining Jobs", f"{area_row['total_mining']:.0f}")
+        st.subheader(f"Baseline Stats: {selected_option}")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Avg. Weekly Income", f"${area_row['avg_weekly_income']:,.0f}")
+        c2.metric("Avg. Weekly Rent", f"${area_row['avg_weekly_rent']:,.0f}")
+        c3.metric("Avg. Weekly Mortgage", f"${area_row['avg_weekly_mortgage']:,.0f}")
+        c4.metric("Modelled Housing Stress", f"{area_row['housing_stress_index']:.1f}%")
+        c5.metric("Mining Jobs", f"{area_row['total_mining']:.0f}")
 
         # Charts
         st.divider()
-        col_left, col_right = st.columns(2)
+        col_left, col_mid, col_right = st.columns(3)
         
         with col_left:
             st.write("Employment Breakdown")
@@ -151,15 +154,36 @@ if selected_option != "Show All WA":
                 'Status': ['Full Time', 'Part Time', 'Unemployed'],
                 'Count': [area_row['total_employed_full_time'], area_row['total_employed_part_time'], area_row['total_unemployed']]
             })
-            st.bar_chart(emp_data.set_index('Status'))
+            st.bar_chart(emp_data.set_index('Status'), color="#99d5ff", x_label="Employment Status", y_label="No. of People")
             
-        with col_right:
+        with col_mid:
             st.write("Housing Tenure Mix")
             tenure_data = pd.DataFrame({
                 'Type': ['Renting', 'Mortgage'],
                 'Count': [area_row['renting_households_count'], area_row['mortgage_households_count']]
             })
-            st.bar_chart(tenure_data.set_index('Type'))
+            # Right chart updated to light red
+            st.bar_chart(tenure_data.set_index('Type'), color="#ff9999", x_label="Tenure Type", y_label="No. of Households")
+
+        with col_right:
+            st.write("Mining vs Non-Mining Workforce")
+            total_workforce = area_row['total_employed_full_time'] + area_row['total_employed_part_time']
+            mining_jobs = area_row['total_mining']
+            non_mining = max(0, total_workforce - mining_jobs)
+            
+            # Use Plotly Pie to fix the "empty chart until maximized" rendering bug
+            fig = px.pie(
+                values=[mining_jobs, non_mining],
+                names=['Mining', 'Non-Mining'],
+                hole=0.4,
+                color_discrete_sequence=["#6cd48c", "#bd8112"]
+            )
+            fig.update_layout(
+                margin=dict(l=0, r=0, t=0, b=0),
+                showlegend=True,
+                legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
+            )
+            st.plotly_chart(fig, use_container_width=True, key=f"pie_{selected_option}")
 
     with tab3:
         if run_calc:
@@ -204,4 +228,4 @@ if selected_option != "Show All WA":
                             st.write("API Response:", prediction)
                             st.write("Features Sent:", list(payload.keys()))
 else:
-    st.info("Select a specific area from the sidebar to enable the Economic Data and Scenario Simulator.")
+    st.info("Select a specific area from the sidebar to enable the Area Metrics and Scenario Simulator.")
