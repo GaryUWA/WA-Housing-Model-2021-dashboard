@@ -96,6 +96,9 @@ def load_data():
     # Merge for display, but we keep model_features list clean from the original df_raw
     df = df_raw.merge(names_lookup, left_on=id_col, right_on=code_col, how='left')
     df = df.rename(columns={name_col: 'DISPLAY_NAME'})
+
+    # Pre-format map hover string specifically for tooltip
+    gdf['stress_label'] = gdf['housing_stress_index'].apply(lambda x: f"{x:.2f}")
     
     return json.loads(gdf.to_json()), df, model_features
 
@@ -188,7 +191,11 @@ with tab1:
     ]
     # Spinner for notifying that the geospatial layers are rendering
     with st.spinner("Loading..."):
-        st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view_state))
+        st.pydeck_chart(pdk.Deck(
+            layers=layers, 
+            initial_view_state=view_state,
+            tooltip={"text": "Area: {SAL_NAME21}\nStress Index: {stress_label}%"}
+        ))
 
 if active_area != "Show All WA":
     area_row = valid_df[valid_df['DISPLAY_NAME'] == active_area].iloc[0]
