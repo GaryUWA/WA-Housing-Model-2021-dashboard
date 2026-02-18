@@ -285,6 +285,32 @@ if active_area != "Show All WA":
                         
                         # Comparison display
                         st.write(f"The simulated changes result in a **{abs(new_val - curr_val):.2f}%** {'increase' if new_val > curr_val else 'decrease'} in housing stress for {active_area}.")
+                        
+                        # --- FEATURE IMPORTANCE PLOT ---
+                        st.divider()
+                        st.subheader("Scenario Change Intensity")
+                        st.write("This chart indicates how significantly each feature was modified relative to its allowable simulation range.")
+                        
+                        # Calculate relative impact (absolute values of adjustments scaled for comparison)
+                        # Helps explain why 0.01% shifts occur vs large shifts.
+                        impact_data = pd.DataFrame({
+                            'Feature': ['Income', 'Rent', 'Mortgage', 'Unemployment', 'Mining'],
+                            'Relative Change': [abs(inc_adj)/500, abs(rent_adj)/200, abs(mort_adj)/200, abs(unemp_adj)/10, abs(mining_adj)/10]
+                        }).sort_values('Relative Change', ascending=True)
+
+                        fig_imp = px.bar(
+                            impact_data,
+                            x='Relative Change',
+                            y='Feature',
+                            orientation='h',
+                            title="Magnitude of Input Adjustments",
+                            labels={'Relative Change': 'Normalised Adjustment Factor (0-1)'},
+                            color='Relative Change',
+                            color_continuous_scale='Blues'
+                        )
+                        fig_imp.update_layout(showlegend=False, height=300, margin=dict(l=0, r=0, t=40, b=0))
+                        st.plotly_chart(fig_imp, use_container_width=True)
+
                     else:
                         st.error(f"Prediction Failed. Sent {len(payload)} features.")
                         with st.expander("Debug Info"):
