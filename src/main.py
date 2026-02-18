@@ -15,6 +15,10 @@ st.set_page_config(page_title="WA Housing Model 2021", layout="wide")
 if 'use_local' not in st.session_state:
     st.session_state.use_local = False
 
+# Initialise session state for active tab focus
+if 'active_tab' not in st.session_state:
+    st.session_state.active_tab = "🗺️ Geospatial View"
+
 # Custom CSS for the legend, metrics, and scrollbar visibility
 st.markdown("""
     <style>
@@ -179,13 +183,19 @@ with st.sidebar:
         mining_adj = st.slider("Mining Workforce Change (%)", -10.0, 10.0, 0.0, step=1.0)
         
         run_calc = st.form_submit_button("Calculate Prediction", type="primary", use_container_width=True)
+        if run_calc:
+            # Set the session state to the target tab name
+            st.session_state.active_tab = "📈 Scenario Results"
 
 # Use the confirmed selection for the rest of the app logic
 active_area = st.session_state.confirmed_selection
 
 # --- MAIN CONTENT ---
 st.title("WA Housing Model 2021")
-tab1, tab2, tab3 = st.tabs(["🗺️ Geospatial View", "📊 Area Metrics", "📈 Scenario Results"])
+
+# We define the tab labels and use the session state to set the default value
+tab_titles = ["🗺️ Geospatial View", "📊 Area Metrics", "📈 Scenario Results"]
+tab1, tab2, tab3 = st.tabs(tab_titles)
 
 with tab1:
     # Default view (Perth)
@@ -412,5 +422,23 @@ if active_area != "Show All WA":
                         ]
                     })
                     st.table(comparison_df)
+        else:
+            st.info("Adjust the sliders in the sidebar and click 'Calculate Prediction' to see results here.")
+
+# Forces the browser to click the tab button via JS
+# because st.tabs doesn't seem to support a 'selected' index parameter natively.
+if st.session_state.active_tab == "📈 Scenario Results":
+    st.components.v1.html(
+        """
+        <script>
+            var tabs = window.parent.document.querySelectorAll('button[data-baseweb="tab"]');
+            tabs[2].click();
+        </script>
+        """,
+        height=0,
+    )
+    # Reset state so it doesn't hijack manual navigation later
+    st.session_state.active_tab = ""
+
 else:
     st.info("Select a specific area from the sidebar to enable the Area Metrics and Scenario Simulator.")
