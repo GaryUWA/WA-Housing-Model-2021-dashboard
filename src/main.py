@@ -31,6 +31,13 @@ def load_data():
     gdf = gpd.read_file("data/wa_census_spatial_2021.gpkg").to_crs("EPSG:4326")
     df_raw = pd.read_csv("data/wa_census_master_2021.csv")
     
+    # --- GEOMETRY SIMPLIFICATION ---
+    # Temporarily project to metres for accurate simplification, then back to degrees
+    # Reduces number of polygon vertices to optimise browser performance.
+    gdf = gdf.to_crs(epsg=3857)
+    gdf['geometry'] = gdf.geometry.simplify(tolerance=500, preserve_topology=True)
+    gdf = gdf.to_crs(epsg=4326)
+    
     # Identify model features STRICTLY from the raw CSV to avoid merge duplicates
     target_col = 'housing_stress_index'
     id_col = 'SAL_CODE_2021'
