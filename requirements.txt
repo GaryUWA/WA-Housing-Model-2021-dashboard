@@ -7,9 +7,13 @@ python-dotenv==1.0.1
 
 # Data Processing & Visualisation
 pandas==2.2.2
+numpy==2.4.2
 plotly==6.0.0
 pydeck==0.9.1
 geopandas==1.0.1
 pyogrio==0.10.0
+shapely==2.1.2
 
-# Production Server
+# Machine Learning & Inference
+scikit-learn==1.8.0
+joblib==1.5.3
