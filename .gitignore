@@ -3,12 +3,10 @@
 __pycache__/
 *.py[cod]
 
-# Data & Large Files
-data/*.geojson
-
 # OS-specific files
 .DS_Store
 Thumbs.db
 desktop.ini
 
+# Secrets & Local Config
 .env
