@@ -10,7 +10,7 @@ This project demonstrates a modular machine learning architecture:
 
 ## Live Demo
 The dashboard is deployed and accessible via **Streamlit Community Cloud**. This provides a hosted alternative to manual reproduction, allowing for immediate exploration of the model's capabilities:
-**[View Live Dashboard](https://wa-housing-model-2021.streamlit.app/)**
+**[View Live Dashboard](https://wa-housing-model-2021-dashboard-hnn3poaha5r7uhhgucuzjs.streamlit.app/)**
 
 ## App Structure & Features
 The application is organised into three functional tabs and a central control sidebar:
